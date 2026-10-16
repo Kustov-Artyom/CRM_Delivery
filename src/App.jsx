@@ -277,7 +277,7 @@ function MainApp() {
   <Modal title={editing ? `Изменить заказ № ${editing.id}` : "Создать заказ"} open={modalOpen} onCancel={()=>setModalOpen(false)} footer={null} destroyOnHidden>
     <Form form={form} layout="vertical" onFinish={saveOrder} initialValues={{status:"Ожидает",executor:"Не назначен",amount:350,period:"Сегодня"}}>
       <Form.Item name="client" label="Клиент" rules={[{required:true,message:"Введите клиента"}]}><Input placeholder="Название клиента"/></Form.Item>
-      <Form.Item name="route" label="Маршрут" rules={[{required:true,message:"Введите маршрут"}]}><Input placeholder="Адрес забора → адрес доставки"/></Form.Item>
+      <Form.Item name="route" label="Маршрут" rules={[{required:true,message:"Введите маршрут"}]}><Input placeholder="Адрес доставки"/></Form.Item>
       <Form.Item name="executor" label="Исполнитель"><Select options={["Не назначен","Иван Петров","Анна Морозова","Дмитрий Власов","Егор Смирнов"].map(v=>({value:v,label:v}))}/></Form.Item>
       <Form.Item name="status" label="Статус"><Select options={Object.keys(statusColors).map(v=>({value:v,label:v}))}/></Form.Item>
       <Form.Item name="amount" label="Стоимость"><Input type="number" suffix="₽"/></Form.Item>
