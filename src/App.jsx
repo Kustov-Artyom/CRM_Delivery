@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import {
   App as AntApp, Button, ConfigProvider, Form, Input, Modal, Select,
-  Table, Tag, message, Card, Statistic, Switch, Divider
+  Table, Tag, message, Card, Statistic, Switch
 } from "antd";
 import {
   ArrowUpRight, LayoutDashboard, Package, Users, Route, Bot, FileText,
@@ -10,12 +10,12 @@ import {
   CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, UserRoundPlus, Send,
   CircleHelp, Sun, Moon, LogIn, UserPlus, LogOut, User
 } from "lucide-react";
-import { api } from "./api/mockApi"; 
+import { api } from "./api/mockApi";
 import "./App.css";
 
 const initialOrders = [
   { id: "10428", client: "Flora Studio", route: "ул. Мира, 8 → Невский, 41", executor: "Иван Петров", status: "В пути", amount: 450, period: "Сегодня" },
-  { id: "10427", client: "Бутик Rêve", route: "Пушкинская, 13 → Садовая, 9", executor: "Анна Морозова", status: "В пути", amount: 350, period: "Сегодня" }, // Пункт 6: было "На заборе"
+  { id: "10427", client: "Бутик Rêve", route: "Пушкинская, 13 → Садовая, 9", executor: "Анна Морозова", status: "В пути", amount: 350, period: "Сегодня" },
   { id: "10426", client: "Цветы №1", route: "Литейный, 12 → Чехова, 3", executor: "Не назначен", status: "Ожидает", amount: 400, period: "Сегодня" },
   { id: "10425", client: "Арт-магазин", route: "Малая Морская, 5 → Казанская, 8", executor: "Дмитрий Власов", status: "Проблема", amount: 550, period: "Сегодня" },
 ];
@@ -462,12 +462,11 @@ function MainApp() {
 
   const [form] = Form.useForm();
 
-useEffect(() => {
-  document.documentElement.setAttribute('data-theme', theme);
-  return () => document.documentElement.removeAttribute('data-theme');
-}, [theme]);
+  useEffect(() => { 
+    localStorage.setItem("crm-theme", theme); 
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
-  useEffect(() => { localStorage.setItem("crm-theme", theme); }, [theme]);
   useEffect(() => { localStorage.setItem("crm-profile", JSON.stringify(profile)); }, [profile]);
   useEffect(() => { localStorage.setItem("crm-popups", JSON.stringify(popups)); }, [popups]);
 
@@ -521,7 +520,7 @@ useEffect(() => {
         onCancel={() => setModalOpen(false)} 
         footer={null} 
         destroyOnHidden
-        className="dark-mode-aware-modal"
+        getContainer={false}
       >
         <Form form={form} layout="vertical" onFinish={saveOrder} initialValues={{ status: "Ожидает", executor: "Не назначен", amount: 350, period: "Сегодня" }}>
           <Form.Item name="client" label="Клиент" rules={[{ required: true, message: "Введите клиента" }]}><Input placeholder="Название клиента" /></Form.Item>
