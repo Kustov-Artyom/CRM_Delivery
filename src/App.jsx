@@ -4,7 +4,9 @@ import {
   getOrderAddresses,
   getOrderFormValues,
   withOrderAddresses,
+  calculateDeliveryCost,
 } from "./pages/orders/orderUtils.js";
+import { fetchRouteDistance } from "./pages/orders/OrderMap.jsx";
 import {
   App as AntApp,
   Button,
@@ -20,6 +22,7 @@ import {
   Statistic,
   Badge,
   Switch,
+  Spin,
 } from "antd";
 import {
   FileText,
@@ -54,6 +57,7 @@ const initialOrders = [
     status: "В пути",
     amount: 450,
     period: "Сегодня",
+    tariff: "courier_standard",
   },
   {
     id: "10427",
@@ -63,6 +67,7 @@ const initialOrders = [
     status: "На заборе",
     amount: 350,
     period: "Сегодня",
+    tariff: "courier_pedestrian",
   },
   {
     id: "10426",
@@ -72,6 +77,7 @@ const initialOrders = [
     status: "Ожидает",
     amount: 400,
     period: "Сегодня",
+    tariff: "courier_standard",
   },
   {
     id: "10425",
@@ -81,6 +87,7 @@ const initialOrders = [
     status: "Проблема",
     amount: 550,
     period: "Сегодня",
+    tariff: "courier_express",
   },
   {
     id: "10424",
@@ -90,6 +97,7 @@ const initialOrders = [
     status: "В пути",
     amount: 350,
     period: "Вчера",
+    tariff: "courier_standard",
   },
 ];
 
@@ -1074,6 +1082,7 @@ function MainApp() {
   const [selectedId, setSelectedId] = useState("10428");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("crm-theme") || "light",
   );
@@ -1104,6 +1113,22 @@ function MainApp() {
   useEffect(() => {
     localStorage.setItem("crm-notifications", JSON.stringify(notifications));
   }, [notifications]);
+
+  const calculateAutoCost = async () => {
+    const from = form.getFieldValue("from");
+    const to = form.getFieldValue("to");
+    const tariff = form.getFieldValue("tariff") || "courier_standard";
+
+    if (from && to && from.trim().length > 2 && to.trim().length > 2) {
+      setCalculatingPrice(true);
+      const distanceMeters = await fetchRouteDistance(from, to);
+      if (distanceMeters) {
+        const cost = calculateDeliveryCost(distanceMeters, tariff);
+        form.setFieldsValue({ amount: cost });
+      }
+      setCalculatingPrice(false);
+    }
+  };
 
   const openOrder = (id) => {
     setSelectedId(id);
@@ -1187,6 +1212,7 @@ function MainApp() {
           initialValues={{
             status: "Ожидает",
             executor: "Не назначен",
+            tariff: "courier_standard",
             amount: 350,
             period: "Сегодня",
           }}
@@ -1203,14 +1229,36 @@ function MainApp() {
             label="Откуда"
             rules={[{ required: true, message: "Введите адрес отправления" }]}
           >
-            <Input placeholder="Адрес отправления" />
+            <Input
+              placeholder="Адрес отправления"
+              onBlur={calculateAutoCost}
+            />
           </Form.Item>
           <Form.Item
             name="to"
             label="Куда"
             rules={[{ required: true, message: "Введите адрес доставки" }]}
           >
-            <Input placeholder="Адрес доставки" />
+            <Input placeholder="Адрес доставки" onBlur={calculateAutoCost} />
+          </Form.Item>
+          <Form.Item name="tariff" label="Тариф доставки">
+            <Select
+              onChange={calculateAutoCost}
+              options={[
+                {
+                  value: "courier_standard",
+                  label: "Стандарт (авто) — от 200 ₽",
+                },
+                {
+                  value: "courier_express",
+                  label: "Экспресс — от 350 ₽",
+                },
+                {
+                  value: "courier_pedestrian",
+                  label: "Пеший курьер — от 150 ₽",
+                },
+              ]}
+            />
           </Form.Item>
           <Form.Item name="executor" label="Исполнитель">
             <Select
@@ -1231,7 +1279,17 @@ function MainApp() {
               }))}
             />
           </Form.Item>
-          <Form.Item name="amount" label="Стоимость">
+          <Form.Item
+            name="amount"
+            label={
+              <span>
+                Стоимость{" "}
+                {calculatingPrice && (
+                  <Spin size="small" style={{ marginLeft: 8 }} />
+                )}
+              </span>
+            }
+          >
             <Input type="number" suffix="₽" />
           </Form.Item>
           <div className="modal-actions">

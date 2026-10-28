@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   App as AntApp,
   Button,
@@ -7,12 +7,20 @@ import {
   Input,
   Modal,
   Select,
+  AutoComplete,
   Table,
   Tag,
+  Spin,
 } from "antd";
 import { useNavigate, Outlet } from "react-router-dom";
 import AppShell from "../../shell/AppShell.jsx";
-import { getOrderFormValues, withOrderAddresses } from "./orderUtils.js";
+import {
+  getOrderFormValues,
+  withOrderAddresses,
+  calculateDeliveryCost,
+  DELIVERY_RATES,
+} from "./orderUtils.js";
+import { fetchRouteDistance, searchAddressSuggestions } from "./OrderMap.jsx";
 import "../../App.css";
 
 const initialOrders = [
@@ -22,6 +30,8 @@ const initialOrders = [
     route: "ул. Мира, 8 → Невский, 41",
     executor: "Иван Петров",
     status: "В пути",
+    tariff: "courier_standard",
+    paymentMethod: "Безналичный расчёт",
     amount: 450,
     period: "Сегодня",
   },
@@ -30,7 +40,9 @@ const initialOrders = [
     client: "Бутик Rêve",
     route: "Пушкинская, 13 → Садовая, 9",
     executor: "Анна Морозова",
-    status: "На заборе",
+    status: "Собирается",
+    tariff: "courier_pedestrian",
+    paymentMethod: "Наличные курьеру",
     amount: 350,
     period: "Сегодня",
   },
@@ -40,6 +52,8 @@ const initialOrders = [
     route: "Литейный, 12 → Чехова, 3",
     executor: "Не назначен",
     status: "Ожидает",
+    tariff: "courier_standard",
+    paymentMethod: "Безналичный расчёт",
     amount: 400,
     period: "Сегодня",
   },
@@ -49,6 +63,8 @@ const initialOrders = [
     route: "Малая Морская, 5 → Казанская, 8",
     executor: "Дмитрий Власов",
     status: "Проблема",
+    tariff: "courier_express",
+    paymentMethod: "СБП / онлайн",
     amount: 550,
     period: "Сегодня",
   },
@@ -57,13 +73,17 @@ const initialOrders = [
     client: "Flora Studio",
     route: "Марата, 20 → Восстания, 1",
     executor: "Егор Смирнов",
-    status: "В пути",
+    status: "Доставлен",
+    tariff: "courier_standard",
+    paymentMethod: "Безналичный расчёт",
     amount: 350,
     period: "Вчера",
   },
 ];
 
-const statuses = ["В пути", "На заборе", "Ожидает", "Проблема", "Доставлен"];
+const allStatuses = ["Ожидает", "Собирается", "В пути", "Проблема", "Доставлен"];
+const createStatuses = ["Ожидает", "Собирается"];
+
 const executors = [
   "Не назначен",
   "Иван Петров",
@@ -72,9 +92,15 @@ const executors = [
   "Егор Смирнов",
 ];
 
+const paymentMethods = [
+  "Безналичный расчёт",
+  "Наличные курьеру",
+  "СБП / онлайн",
+];
+
 export function Status({ value }) {
   const statusClass =
-    value === "На заборе"
+    value === "Собирается"
       ? "pickup"
       : value === "Ожидает"
         ? "waiting"
@@ -142,27 +168,110 @@ function OrdersRouteContent() {
   const [orders, setOrders] = useState(initialOrders);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [calculatingPrice, setCalculatingPrice] = useState(false);
+  const [calculatedAmount, setCalculatedAmount] = useState(350);
+
+  const [fromOptions, setFromOptions] = useState([]);
+  const [toOptions, setToOptions] = useState([]);
+
+  const fromDebounceRef = useRef(null);
+  const toDebounceRef = useRef(null);
+
   const [form] = Form.useForm();
+
+  const handleSearchFrom = (text) => {
+    if (fromDebounceRef.current) clearTimeout(fromDebounceRef.current);
+    if (!text || text.trim().length < 3) {
+      setFromOptions([]);
+      return;
+    }
+    fromDebounceRef.current = setTimeout(async () => {
+      const suggestions = await searchAddressSuggestions(text);
+      setFromOptions(suggestions);
+    }, 500);
+  };
+
+  const handleSearchTo = (text) => {
+    if (toDebounceRef.current) clearTimeout(toDebounceRef.current);
+    if (!text || text.trim().length < 3) {
+      setToOptions([]);
+      return;
+    }
+    toDebounceRef.current = setTimeout(async () => {
+      const suggestions = await searchAddressSuggestions(text);
+      setToOptions(suggestions);
+    }, 500);
+  };
+
+  const calculateAutoCost = async () => {
+    const from = form.getFieldValue("from");
+    const to = form.getFieldValue("to");
+    const tariff = form.getFieldValue("tariff") || "courier_standard";
+
+    if (from && to && from.trim().length > 2 && to.trim().length > 2) {
+      setCalculatingPrice(true);
+      const distanceMeters = await fetchRouteDistance(from, to);
+      if (distanceMeters) {
+        const cost = calculateDeliveryCost(distanceMeters, tariff);
+        setCalculatedAmount(cost);
+        form.setFieldsValue({ amount: cost });
+      } else {
+        const fallbackCost = DELIVERY_RATES[tariff]?.base || 200;
+        setCalculatedAmount(fallbackCost);
+        form.setFieldsValue({ amount: fallbackCost });
+      }
+      setCalculatingPrice(false);
+    } else {
+      const baseCost = DELIVERY_RATES[tariff]?.base || 200;
+      setCalculatedAmount(baseCost);
+      form.setFieldsValue({ amount: baseCost });
+    }
+  };
 
   const openCreate = () => {
     setEditing(null);
     form.resetFields();
+    setFromOptions([]);
+    setToOptions([]);
+    setCalculatedAmount(DELIVERY_RATES.courier_standard.base);
+    form.setFieldsValue({
+      status: "Ожидает",
+      executor: "Не назначен",
+      tariff: "courier_standard",
+      paymentMethod: "Безналичный расчёт",
+      amount: DELIVERY_RATES.courier_standard.base,
+    });
     setModalOpen(true);
   };
 
   const openEdit = (order) => {
+    if (order.status === "Доставлен") {
+      message.warning("Заказ доставлен и закрыт для редактирования");
+      return;
+    }
     setEditing(order);
-    form.setFieldsValue(getOrderFormValues(order));
+    setFromOptions([]);
+    setToOptions([]);
+    const formVals = getOrderFormValues(order);
+    form.setFieldsValue(formVals);
+    setCalculatedAmount(order.amount || DELIVERY_RATES.courier_standard.base);
     setModalOpen(true);
   };
 
   const closeModal = () => {
     setModalOpen(false);
     setEditing(null);
+    setFromOptions([]);
+    setToOptions([]);
   };
 
   const saveOrder = (values) => {
-    const orderValues = withOrderAddresses(values);
+    const finalAmount = calculatedAmount;
+    const orderValues = {
+      ...withOrderAddresses(values),
+      amount: finalAmount,
+    };
+
     if (editing) {
       setOrders((current) =>
         current.map((order) =>
@@ -191,6 +300,7 @@ function OrdersRouteContent() {
     openEdit,
     message,
   };
+
   return (
     <AppShell collapsed={collapsed} setCollapsed={setCollapsed} theme={theme}>
       <Outlet context={context} />
@@ -213,7 +323,9 @@ function OrdersRouteContent() {
           initialValues={{
             status: "Ожидает",
             executor: "Не назначен",
-            amount: 350,
+            tariff: "courier_standard",
+            paymentMethod: "Безналичный расчёт",
+            amount: 200,
           }}
         >
           <Form.Item
@@ -223,37 +335,109 @@ function OrdersRouteContent() {
           >
             <Input placeholder="Название клиента" />
           </Form.Item>
+
           <Form.Item
             name="from"
             label="Откуда"
-            extra="пока что поиск только по Челябинску (в проекте фронтов почему-то по дефолту стоит Челябинск, и когда вбиваешь адрес то сразу кидает на питер)"
             rules={[{ required: true, message: "Введите адрес отправления" }]}
           >
-            <Input placeholder="Например, Невский проспект, 28" />
+            <AutoComplete
+              options={fromOptions}
+              onSearch={handleSearchFrom}
+              onSelect={calculateAutoCost}
+              onBlur={calculateAutoCost}
+              placeholder="Например, Энгельса, 44"
+            />
           </Form.Item>
+
           <Form.Item
             name="to"
             label="Куда"
             rules={[{ required: true, message: "Введите адрес доставки" }]}
           >
-            <Input placeholder="Например, Литейный проспект, 12" />
+            <AutoComplete
+              options={toOptions}
+              onSearch={handleSearchTo}
+              onSelect={calculateAutoCost}
+              onBlur={calculateAutoCost}
+              placeholder="Например, Ленина, 50"
+            />
           </Form.Item>
+
+          <Form.Item name="tariff" label="Тариф доставки">
+            <Select
+              onChange={calculateAutoCost}
+              options={[
+                {
+                  value: "courier_standard",
+                  label: "Стандарт (авто) — от 200 ₽",
+                },
+                {
+                  value: "courier_express",
+                  label: "Экспресс — от 350 ₽",
+                },
+                {
+                  value: "courier_pedestrian",
+                  label: "Пеший курьер — от 150 ₽",
+                },
+              ]}
+            />
+          </Form.Item>
+
+          <Form.Item name="paymentMethod" label="Способ оплаты">
+            <Select
+              options={paymentMethods.map((value) => ({
+                value,
+                label: value,
+              }))}
+            />
+          </Form.Item>
+
           <Form.Item name="executor" label="Исполнитель">
             <Select
               options={executors.map((value) => ({ value, label: value }))}
             />
           </Form.Item>
+
           <Form.Item name="status" label="Статус">
             <Select
-              options={statuses.map((value) => ({ value, label: value }))}
+              options={(editing ? allStatuses : createStatuses).map((value) => ({
+                value,
+                label: value,
+              }))}
             />
           </Form.Item>
-          <Form.Item name="amount" label="Стоимость">
-            <Input type="number" suffix="₽" />
+
+          <Form.Item name="amount" hidden>
+            <Input />
           </Form.Item>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "rgba(79, 86, 223, 0.08)",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              marginBottom: "16px",
+            }}
+          >
+            <span style={{ fontSize: "12px", color: "#697586" }}>
+              Расчётная стоимость доставки:
+            </span>
+            <b style={{ fontSize: "16px", color: "#18243a" }}>
+              {calculatingPrice ? (
+                <Spin size="small" />
+              ) : (
+                `${calculatedAmount} ₽`
+              )}
+            </b>
+          </div>
+
           <div className="modal-actions">
             <Button onClick={closeModal}>Отмена</Button>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" disabled={calculatingPrice}>
               {editing ? "Сохранить" : "Создать заказ"}
             </Button>
           </div>

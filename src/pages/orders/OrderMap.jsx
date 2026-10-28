@@ -7,7 +7,7 @@ const geocodeCache = new Map();
 let geocodingQueue = Promise.resolve();
 let lastGeocodingRequestAt = 0;
 
-function geocodeAddress(address, signal) {
+export function geocodeAddress(address, signal) {
   const fullAddress = `${address}, Челябинск, Россия`;
   const cacheKey = fullAddress.toLocaleLowerCase("ru-RU");
   if (geocodeCache.has(cacheKey)) {
@@ -15,7 +15,7 @@ function geocodeAddress(address, signal) {
   }
 
   const request = geocodingQueue.then(async () => {
-    if (signal.aborted) {
+    if (signal?.aborted) {
       throw new DOMException("Geocoding was cancelled", "AbortError");
     }
 
@@ -23,7 +23,7 @@ function geocodeAddress(address, signal) {
     if (delay > 0) {
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
-    if (signal.aborted) {
+    if (signal?.aborted) {
       throw new DOMException("Geocoding was cancelled", "AbortError");
     }
 
@@ -57,12 +57,92 @@ function geocodeAddress(address, signal) {
   return request;
 }
 
-export default function OrderMap({ from, to }) {
+export async function searchAddressSuggestions(query, signal) {
+  if (!query || query.trim().length < 3) return [];
+  const fullQuery = `${query.trim()}, Челябинск`;
+  
+  return geocodingQueue.then(async () => {
+    if (signal?.aborted) return [];
+
+    const delay = 1100 - (Date.now() - lastGeocodingRequestAt);
+    if (delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+    if (signal?.aborted) return [];
+
+    lastGeocodingRequestAt = Date.now();
+    const url = new URL("https://nominatim.openstreetmap.org/search");
+    url.search = new URLSearchParams({
+      q: fullQuery,
+      format: "jsonv2",
+      limit: "5",
+      countrycodes: "ru",
+      "accept-language": "ru",
+      addressdetails: "1",
+    });
+
+    try {
+      const response = await fetch(url, {
+        signal,
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return [];
+
+      const data = await response.json();
+      return data.map((item) => {
+        const road = item.address?.road || "";
+        const house = item.address?.house_number || "";
+        const shortName = road ? `${road}${house ? `, ${house}` : ""}` : item.name || item.display_name;
+
+        return {
+          value: shortName,
+          label: (
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <span style={{ fontWeight: 600 }}>{shortName}</span>
+              <span style={{ fontSize: "11px", color: "#8a96aa" }}>{item.display_name}</span>
+            </div>
+          ),
+        };
+      });
+    } catch {
+      return [];
+    }
+  });
+}
+
+export async function fetchRouteDistance(fromAddress, toAddress) {
+  if (!fromAddress || !toAddress) return null;
+  try {
+    const [fromLoc, toLoc] = await Promise.all([
+      geocodeAddress(fromAddress),
+      geocodeAddress(toAddress),
+    ]);
+    if (!fromLoc || !toLoc) return null;
+
+    const coordinates = `${fromLoc.lng},${fromLoc.lat};${toLoc.lng},${toLoc.lat}`;
+    const url = new URL(
+      `https://router.project-osrm.org/route/v1/driving/${coordinates}`,
+    );
+    url.search = new URLSearchParams({
+      overview: "false",
+      steps: "false",
+    });
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.routes?.[0]?.distance || null;
+  } catch {
+    return null;
+  }
+}
+
+export default function OrderMap({ from, to, onRouteCalculated }) {
   const mapContainer = useRef(null);
   const addressKey = JSON.stringify([from, to]);
   const [mapState, setMapState] = useState(null);
   const [mapError, setMapError] = useState(null);
   const [routeState, setRouteState] = useState(null);
+
   const stateIsCurrent = mapState?.addressKey === addressKey;
   const locations = stateIsCurrent
     ? mapState.locations
@@ -160,6 +240,13 @@ export default function OrderMap({ from, to }) {
             duration: routeResult.duration,
             error: "",
           });
+
+          if (onRouteCalculated) {
+            onRouteCalculated({
+              distance: routeResult.distance,
+              duration: routeResult.duration,
+            });
+          }
         }
       } catch (requestError) {
         if (!controller.signal.aborted) {
@@ -174,7 +261,7 @@ export default function OrderMap({ from, to }) {
 
     loadRoute();
     return () => controller.abort();
-  }, [error, loading, points, routeKey]);
+  }, [error, loading, points, routeKey, onRouteCalculated]);
 
   useEffect(() => {
     if (
@@ -207,6 +294,7 @@ export default function OrderMap({ from, to }) {
           zoom: 14,
           attributionControl: true,
         });
+
         map.once("load", () => {
           if (cancelled) {
             return;
